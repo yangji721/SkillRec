@@ -38,6 +38,23 @@ class OnPolicyTrainer(object):
                 break
         return ret
 
+    def get_act_pool_with_preference(self, state, preference):
+        cnt = [0] * n_skill
+        for i in range(n_skill):
+            if state[i] == 1 or preference[i] == 1:
+                for u in self.relational_lst[i]:
+                    cnt[u] += 1
+        skill_id = list(range(n_skill))
+        skill_id.sort(key=lambda x: cnt[x] + 1e-5 * x, reverse=True)
+        ret = []
+        for u in range(n_skill):
+            s = skill_id[u]
+            if state[s] == 0:
+                ret.append(s)
+            if len(ret) == self.pool_size:
+                break
+        return ret
+
     def __init__(self, Qnet, Qtarget, environment, beta, train_samples, relational_lst, memory, pool_size, sess):
         self.environment = environment
         self.relational_lst = relational_lst
@@ -82,14 +99,16 @@ class OnPolicyTrainer(object):
             # 采样一个前缀
             k = randint(0, n_data - 1)
             x, y = data_train[k]
-            prefix = self.train_samples[x][0]
+            prefix = self.train_samples[x][0][0]
+            preference = self.train_samples[x][0][1]
+            environment.job_matcher.set_target(preference)
 
             salary_pre = self.environment.add_prefix(prefix)
             for t in range(T):
                 state_pre = self.environment.state_list.copy()
-                s, _ = self.sampler.sample(self.environment.state)
-                easy, salary, r = self.environment.add_skill(s, evaluate=True)
-                self.memory.store((state_pre, s, (easy, salary - salary_pre)))
+                s, _ = self.sampler.sample_with_preference(sparse_to_dense(preference, n_skill), self.environment.state)
+                easy, salary, r, _, _ = self.environment.add_skill(s, evaluate=True)
+                self.memory.store((state_pre, s, (easy, salary - salary_pre), preference))
                 salary_pre = salary
 
             if self.memory.get_size() > batch_size * 10:
@@ -103,13 +122,14 @@ class OnPolicyTrainer(object):
         data_skill = [u[1] for u in data_batch]
         data_easy = [u[2][0] for u in data_batch]
         data_salary = [u[2][1] for u in data_batch]
+        data_preference = [sparse_to_dense(u[3], n_skill) for u in data_batch]
 
         pool_nxt = []
-        for state, skill in zip(data_state, data_skill):
+        for state, preference, skill in zip(data_state, data_preference, data_skill):
             state[skill] = 1
-            pool_nxt.append(self.get_act_pool(state))
+            pool_nxt.append(self.get_act_pool_with_preference(state, preference))
 
-        data_salary_easy, _ = self.Qtarget.estimate_maxq_batch(data_state, pool_nxt)  #
+        data_salary_easy, _ = self.Qtarget.estimate_maxq_batch(data_preference, data_state, pool_nxt)  #
         data_salary_q, data_easy_q = data_salary_easy
 
         for state, skill in zip(data_state, data_skill):
@@ -118,7 +138,7 @@ class OnPolicyTrainer(object):
         data_easy = [r + (1 - self.beta) * q for r, q in zip(data_easy, data_easy_q)]
         data_salary = [r + (1 - self.beta) * q for r, q in zip(data_salary, data_salary_q)]
 
-        return data_state, [[skill] * self.pool_size for skill in data_skill], data_salary, data_easy
+        return data_state, [[skill] * self.pool_size for skill in data_skill], data_salary, data_easy, data_preference
 
 
 # 参数读取
@@ -128,12 +148,12 @@ relation_lst = read_skill_graph()
 
 
 if __name__ == "__main__":
-    direct_name = "resume"
-    env_params = {"lambda_d": 0.1, "beta": 0.2, 'pool_size': 100}
+    direct_name = "preference"
+    env_params = {"lambda_d": 1, "beta": 0.2, 'pool_size': 100}
     # 难度 & 奖励
     itemset = itemset_process(skill_cnt)
     d_estimator = DifficultyEstimator(item_sets=[u[0] for u in itemset], item_freq=[u[1] for u in itemset], n_samples=len(sample_lst))
-    job_matcher = JobMatcher(n_top=100, skill_list=[u[0] for u in sample_lst], salary=[u[1] for u in sample_lst], w=5, th=10.0 / 9)
+    job_matcher = JobMatcher(n_top=100, skill_list=[u[0] for u in sample_lst], salary=[u[1] for u in sample_lst], w=5, th=10.0 / 9, th2=0.1, w_a=2, w_b=0.5)
 
     environment = Environment(lambda_d=env_params['lambda_d'], d_estimator=d_estimator,
                               job_matcher=job_matcher, n_skill=n_skill)

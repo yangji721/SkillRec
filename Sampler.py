@@ -19,6 +19,23 @@ def get_act_pool(state, n_a, relational_lst, pool_size):
             break
     return ret
 
+def get_act_pool_with_preference(preference, state, n_a, relational_lst, pool_size):
+    cnt = [0] * n_a
+    for i in range(n_a):
+        if state[i] == 1 or preference[i] == 1:
+            for u in relational_lst[i]:
+                cnt[u] += 1
+    skill_id = list(range(n_a))
+    skill_id.sort(key=lambda x: cnt[x] + 1e-5 * x, reverse=True)
+    ret = []
+    for u in range(n_a):
+        s = skill_id[u]
+        if state[s] == 0:
+            ret.append(s)
+        if len(ret) == pool_size:
+            break
+    return ret
+
 class DistributionPoolSampler(object):
     def __init__(self, p, n_a, pool_size, relational_lst):
         self.n_a = n_a
@@ -40,6 +57,18 @@ class DistributionPoolSampler(object):
     def sample(self, state):
 
         pool = get_act_pool(state, self.n_a, self.relational_lst, self.pool_size)
+        p = [self.p[u] for u in pool]
+        for i in range(len(p) - 1):
+            p[i + 1] += p[i]
+
+        s = pool[self.binary_search(p, random.random() * p[-1], 0, self.pool_size - 1)]
+        while state[s] != 0:
+            s = pool[self.binary_search(p, random.random() * p[-1], 0, self.pool_size - 1)]
+        return s, None
+
+    def sample_with_preference(self, state, preference):
+
+        pool = get_act_pool_with_preference(preference, state, self.n_a, self.relational_lst, self.pool_size)
         p = [self.p[u] for u in pool]
         for i in range(len(p) - 1):
             p[i + 1] += p[i]
@@ -118,6 +147,21 @@ class EpsilonGreedyPoolSampler(object):
             q_ret, s_ret = self.Qa.estimate_maxq_action(state, pool)
         return s_ret, q_ret
 
+    def sample_with_preference(self, preference, state, pool=None, retQ=False):
+        if pool is None:
+            pool = get_act_pool_with_preference(preference, state, self.n_a, self.relational_lst, self.pool_size)
+        if random.random() > self.epsilon:
+            s_ret = pool[random.randint(0, len(pool) - 1)]
+            while state[s_ret] != 0:
+                s_ret = pool[random.randint(0, len(pool) - 1)]
+            if retQ:
+                q_ret = self.Qa.estimate_single(state, s_ret)
+            else:
+                q_ret = None
+        else:
+            q_ret, s_ret = self.Qa.estimate_maxq_action(preference, state, pool)
+        return s_ret, q_ret
+
 class BestStrategyPoolSampler(object):
     def __init__(self, relational_lst, Qa, n_a, pool_size):
         self.n_a = n_a
@@ -129,6 +173,12 @@ class BestStrategyPoolSampler(object):
         if pool is None:
             pool = get_act_pool(state, self.n_a, self.relational_lst, self.pool_size)
         q_ret, s_ret = self.Qa.estimate_maxq_action(state, pool)
+        return s_ret, q_ret
+
+    def sample_with_preference(self, preference, state, pool=None):
+        if pool is None:
+            pool = get_act_pool_with_preference(preference, state, self.n_a, self.relational_lst, self.pool_size)
+        q_ret, s_ret = self.Qa.estimate_maxq_action(preference, state, pool)
         return s_ret, q_ret
 
 class BestStrategySampler(object):

@@ -1,4 +1,5 @@
-from Utils.JobReader import skill_lst
+from Utils.JobReader import skill_lst, n_skill
+from Utils.Utils import sparse_to_dense
 import time
 
 
@@ -21,7 +22,7 @@ def evaluate(sampler, environment, data_test, train_samples, epoch, T=16, verbos
         prefix_names = [skill_lst[u] for u in prefix]
         append_skills = []
         for t in range(T):
-            s, q = sampler.sample(environment.state)
+            s, q = sampler.sample_with_preference(sparse_to_dense(preference, n_skill), environment.state)
             easy, salary, r, salary_base, similarity_base = environment.add_skill(s, evaluate=True)
             step_metrics.append((r, easy, salary, salary_base, similarity_base, q))
             append_skills.append(skill_lst[s])
