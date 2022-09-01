@@ -22,9 +22,9 @@ class JobMatcher {
     private:
 		int w, n_samples, n_top;
         double th, th2, w_a, w_b;
+		vector<int> preference;
 		vector<vector<int>> skill_list;
 		vector<double> salary;
-		vector<double> similarity;
 		vector<int> skill_sample_list[2000];
 		int p[600000] = { 0 };
 		priority_queue<State> Qs;
@@ -32,6 +32,7 @@ class JobMatcher {
 		JobMatcher(int w, double th, double th2, double w_a, double w_b, int n_top, vector<vector<int> > skill_list, vector<double> salary);
 		void reset();
 		void set_target(vector<int> target);
+		double calc_similarity(int s_num);
 		double discount(int n_cur, int n_all);
 		void add(int s);
 		double predict_salary(int s);

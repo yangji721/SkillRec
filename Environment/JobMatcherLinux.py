@@ -574,6 +574,9 @@ class JobMatcher(object):
     def set_target(self, target):
         return _JobMatcherLinux.JobMatcher_set_target(self, target)
 
+    def calc_similarity(self, s_num):
+        return _JobMatcherLinux.JobMatcher_calc_similarity(self, s_num)
+
     def discount(self, n_cur, n_all):
         return _JobMatcherLinux.JobMatcher_discount(self, n_cur, n_all)
 

@@ -26,22 +26,25 @@ JobMatcher::JobMatcher(int w, double th, double th2, double w_a, double w_b, int
 void JobMatcher::reset() {
 	memset(p, 0, sizeof(p));
 	while (!Qs.empty()) Qs.pop();
-	similarity.clear();
+	preference.clear();
 }
 
-// set similarity_score
+// set preference
 void JobMatcher::set_target(vector<int> target) {
 	sort(target.begin(), target.end());
-	for (int i = 0; i < n_samples; i++) {
-		auto temp = skill_list[i];
-		sort(temp.begin(), temp.end());
-		vector<int> intersection_set, target_diff, job_diff;
-        set_intersection(target.begin(), target.end(), temp.begin(), temp.end(), back_inserter(intersection_set));
-		set_difference(target.begin(), target.end(), temp.begin(), temp.end(), inserter(target_diff, target_diff.begin()));
-		set_difference(temp.begin(), temp.end(), target.begin(), target.end(), inserter(job_diff, job_diff.begin()));
-		double similarity_score = double(intersection_set.size()) / double(intersection_set.size() + w_a*target_diff.size() + w_b * job_diff.size());
-		this->similarity.push_back(similarity_score);
-	}
+	this->preference = target;
+}
+
+//calc similarity scores
+double JobMatcher::calc_similarity(int s_num) {
+	auto temp = skill_list[s_num];
+	sort(temp.begin(), temp.end());
+	vector<int> intersection_set, target_diff, job_diff;
+    set_intersection(preference.begin(), preference.end(), temp.begin(), temp.end(), back_inserter(intersection_set));
+	set_difference(preference.begin(), preference.end(), temp.begin(), temp.end(), inserter(target_diff, target_diff.begin()));
+	set_difference(temp.begin(), temp.end(), preference.begin(), preference.end(), inserter(job_diff, job_diff.begin()));
+	double similarity_score = double(intersection_set.size()) / double(intersection_set.size() + w_a*target_diff.size() + w_b * job_diff.size());
+	return similarity_score;
 }
 
 double JobMatcher::discount(int n_cur, int n_all) {
@@ -55,10 +58,11 @@ void JobMatcher::add(int s) {
 		p[u] ++;
 		if (p[u] * th < skill_list[u].size()) continue;
 		// add similarity threshold
-		if (similarity[u] < th2) continue;
+		double simi_score = calc_similarity(u);
+		if (simi_score < th2) continue;
 		double r = discount(p[u], skill_list[u].size());
 		//modify the salary mechanism
-		Qs.push(State(u, (r + similarity[u]) * salary[u], r * salary[u], similarity[u] * salary[u]));
+		Qs.push(State(u, (r + simi_score) * salary[u], r * salary[u], simi_score * salary[u]));
 	}
 }
 
@@ -79,10 +83,11 @@ double JobMatcher::predict_salary(int s) {
 		int pnow = p[u] + 1;
 		if (pnow * th < skill_list[u].size()) continue;
 		// add similarity threshold
-		if (similarity[u] < th2) continue;
+		double simi_score = calc_similarity(u);
+		if (simi_score < th2) continue;
 		double r = discount(pnow, skill_list[u].size());
 		//modify the salary mechanism
-		Qs_tmp.push(State(u, (r + similarity[u]) * salary[u], r * salary[u], similarity[u] * salary[u]));
+		Qs_tmp.push(State(u, (r + simi_score) * salary[u], r * salary[u], simi_score * salary[u]));
 	}
 	return top_average_of_heap(Qs_tmp);
 }

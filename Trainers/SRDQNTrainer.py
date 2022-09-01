@@ -1,12 +1,13 @@
 import sys
+from tracemalloc import start
 sys.path.append("../../")
 sys.path.append("../")
 from Environment.JobMatcherLinux import JobMatcher
-from Utils.JobReader import n_skill, sample_info, read_offline_samples, read_skill_graph, itemset_process, get_similarity_score
+from Utils.JobReader import n_skill, sample_info, read_offline_samples, read_skill_graph, itemset_process
 from Environment.DifficultyEstimatorGLinux import DifficultyEstimator
 from Models.SRDQN import SRDQN
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import tensorflow as tf
 from Utils.Utils import sparse_to_dense, read_pkl_data
 from Utils.Functions import evaluate
@@ -17,6 +18,7 @@ from Environment.Environment import Environment
 from Trainers.Memory import Memory2
 from random import randint
 from math import log
+import time
 
 
 class OnPolicyTrainer(object):
@@ -86,35 +88,55 @@ class OnPolicyTrainer(object):
             if it != 0 and it % target_update_batch == 0:
                 self.target_update()
 
-            if it % verbose_batch == 0:
+            if it != 0 and it % verbose_batch == 0:
                 evaluate(self.best_sampler, self.environment, data_valid, self.train_samples, it / verbose_batch, T=T, verbose=False)
                 self.sampler.epsilon += (1 - self.sampler.epsilon) * 0.1
-                if save_path is None:
-                    self.Qnet.save(HOME_PATH + "data/model/%s_MDQVN_INCG_on_4" % direct_name)
-                else:
-                    self.Qnet.save(save_path)
+                #if save_path is None:
+                #    self.Qnet.save(HOME_PATH + "data/prefermodel/%s_MDQVN_INCG_on_4" % direct_name)
+                #else:
+                #    self.Qnet.save(save_path)
 
             self.environment.clear()
-
+            
+            start = time.time()
             # 采样一个前缀
             k = randint(0, n_data - 1)
             x, y = data_train[k]
             prefix = self.train_samples[x][0][0]
             preference = self.train_samples[x][0][1]
+            end = time.time()
+            print("Cost Time of Sampling is", end - start)
+
+            start = time.time()
             environment.job_matcher.set_target(preference)
+            end = time.time()
+            print("Cost Time of Setting target is", end - start)
+
 
             salary_pre = self.environment.add_prefix(prefix)
             for t in range(T):
                 state_pre = self.environment.state_list.copy()
-                s, _ = self.sampler.sample_with_preference(sparse_to_dense(preference, n_skill), self.environment.state)
+                print("new T cycle", t)
+                start = time.time()
+                s, _ = self.sampler.sample_with_preference(sparse_to_dense(preference, n_skill), self.environment.state)            
+                end = time.time()
+                print("Cost Time of sample_with_preference is", end - start)
+
+                start = time.time()
                 easy, salary, r, _, _ = self.environment.add_skill(s, evaluate=True)
+                end = time.time()
+                print("Cost Time of adding a skill is", end - start)
+
                 self.memory.store((state_pre, s, (easy, salary - salary_pre), preference))
                 salary_pre = salary
 
             if self.memory.get_size() > batch_size * 10:
+                start = time.time()
                 data_batch = self.memory.sample(batch_size)
                 data_batch = self.transform_train_batch(data_batch)
                 self.Qnet.run(data_batch, batch_size, train=True)
+                end = time.time()
+                print("Cost Time of Running a Qnet is", end - start)
         return
 
     def transform_train_batch(self, data_batch):
@@ -149,7 +171,8 @@ relation_lst = read_skill_graph()
 
 if __name__ == "__main__":
     direct_name = "preference"
-    env_params = {"lambda_d": 1, "beta": 0.2, 'pool_size': 100}
+    os.environ['CUDA_VISIBLE_DEVICES'] = sys.argv[1]
+    env_params = {"lambda_d": float(sys.argv[2]), "beta": float(sys.argv[3]), 'pool_size': int(sys.argv[4])}
     # 难度 & 奖励
     itemset = itemset_process(skill_cnt)
     d_estimator = DifficultyEstimator(item_sets=[u[0] for u in itemset], item_freq=[u[1] for u in itemset], n_samples=len(sample_lst))
@@ -188,17 +211,19 @@ if __name__ == "__main__":
     sess.run(tf.global_variables_initializer())
 
     # ----------------- 模型读取 ---------------------
-    Qa.load(HOME_PATH + "data/model/%s_SRDQN" % direct_name)
+    # Qa.load(HOME_PATH + "data/prefermodel/%s_SRDQN" % direct_name)
 
     # ----------------- 模型训练 ---------------------
+    print("================Init Training===============")
     on_trainer = OnPolicyTrainer(Qa, Qa_, environment=environment, train_samples=train_samples, beta=env_params['beta'],
                                  memory=memory, sess=sess, relational_lst=relation_lst, pool_size=env_params['pool_size'])
-    #on_trainer.train(n_batch=320000, batch_size=64, data_train=data_train, data_valid=data_valid, verbose_batch=4096,
-    #                 T=20, target_update_batch=64)
+    print("================Start Training===============")
+    on_trainer.train(n_batch=320000, batch_size=64, data_train=data_train, data_valid=data_valid, verbose_batch=4096,
+                     T=20, target_update_batch=64)
     sampler = BestStrategyPoolSampler(relation_lst, Qa_, n_skill, pool_size=env_params['pool_size'])
 
     data_test = read_pkl_data(HOME_PATH + "data/%s/train_test/testdata.pkl" % direct_name)
     evaluate(sampler=sampler, environment=environment, data_test=data_valid, train_samples=train_samples, epoch=-1, T=20, verbose=False)
 
     # ----------------- 模型保存 -----------------------
-    #Qa.save(HOME_PATH + "data/model/%s_SRDQN" % direct_name)
+    Qa.save(HOME_PATH + "data/prefermodel/%s_SRDQN_lambda_%s_beta_%s_pool_size_%s" % (direct_name, sys.argv[2], sys.argv[3], sys.argv[4]))

@@ -110,17 +110,19 @@ class SRDQN(object):
 
         # ------------------------ salary部分 ---------------------
         salary_in = tf.concat((input_preference_emb, input_emb, act_emb), axis=2)  # -1, pool_size, embsize
-        deep_in = tf.reshape(salary_in, [-1, self.embsize * 2])
+        # embedding size should be embsize * 3
+        deep_in = tf.reshape(salary_in, [-1, self.embsize * 3])
 
-        self.deep_salary_dropout, y_deep, penalty_loss = self._mlp(deep_in, self.embsize * 2, self.salary_deep_layers,
+        self.deep_salary_dropout, y_deep, penalty_loss = self._mlp(deep_in, self.embsize * 3, self.salary_deep_layers,
                                                                    name="%s_deep_salary" % self.name,
                                                                    activation=self.activation, bias=True, sparse_input=False)
         self.s_salary, _ = self._fc(y_deep, self.salary_deep_layers[-1], 1, name="%s_salary_Inc" % self.name, l2_reg=0.0,
                                     activation=None, bias=True, sparse=False)
         # mixed part
-        salary_state_nxt = input_emb + act_emb
-        salary_state_nxt_in = tf.concat((input_preference_emb, salary_state_nxt), axix=2)
-        deep_in = tf.reshape(salary_state_nxt_in, [-1, self.embsize])
+        salary_state_nxt = input_preference_emb + input_emb + act_emb
+        # salary_state_nxt_in = tf.concat([input_preference_emb, salary_state_nxt], axix=2)
+        # embedding size should be embsize * 2
+        deep_in = tf.reshape(salary_state_nxt, [-1, self.embsize])
         self.deep_salarybase_dropout, y_deep, penalty_loss = self._mlp(deep_in, self.embsize, self.salary_deep_layers,
                                                                        name="%s_deep_salary_base" % self.name,
                                                                        activation=self.activation, bias=True,
