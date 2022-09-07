@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from math import log
+from random import randint
 
 from CONFIG import HOME_PATH
 
@@ -17,7 +18,7 @@ from Environment.DifficultyEstimatorGLinux import DifficultyEstimator
 from Utils.JobReader import n_skill, sample_info, read_offline_samples, read_skill_graph, itemset_process
 from Utils.Functions import evaluate
 from Utils.Utils import sparse_to_dense, read_pkl_data, print_result
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
 
 from Sampler import BestStrategyPoolSampler
 from Models.ActDNN import ActDNN
@@ -38,7 +39,7 @@ class ActTrainer(object):
         st = 0
         y_pred = []
         for it in tqdm(range(n_batch)):
-            if it % verbose_batch == 0:
+            if it != 0 and it % verbose_batch == 0:
                 y_test_pred = []
                 evaluate(sampler=self.sampler, environment=self.environment, data_test=data_test, train_samples=train_samples, epoch=-1, T=20, verbose=False)
                 for i in range(0, n_test, batch_size):
@@ -58,6 +59,13 @@ class ActTrainer(object):
                 print_result(evals, n_batch=it)
                 y_pred = []
 
+            self.environment.clear()
+            k = randint(0, n_train - 1)
+            x, y = data_train[k]
+            preference = self.train_samples[x][0][1]
+            print(preference)
+            environment.job_matcher.set_target(preference)
+
             if st == 0:
                 np.random.shuffle(data_train)
             data_batch = data_train[st: min(st + batch_size, n_train)]
@@ -67,9 +75,10 @@ class ActTrainer(object):
             st = st + batch_size if st + batch_size < n_train else 0
 
     def read_train_batch(self, data_batch):
-        data_state = [sparse_to_dense(self.train_samples[i][0][:j] + self.train_samples[i][0][j+1:], n_skill) for i, j in data_batch]
-        data_skill = [self.train_samples[i][0][j] for i, j in data_batch]
-        return data_state, data_skill
+        data_state = [sparse_to_dense(self.train_samples[i][0][0][:j] + self.train_samples[i][0][0][j+1:], n_skill) for i, j in data_batch]
+        data_preference = [sparse_to_dense(self.train_samples[i][0][1], n_skill) for i, j in data_batch]
+        data_skill = [self.train_samples[i][0][0][j] for i, j in data_batch]
+        return data_state, data_skill, data_preference
 
 
 sample_lst, skill_cnt, jd_len = sample_info()
@@ -77,26 +86,27 @@ skill_p = [log(u * 1.0 / len(sample_lst)) for u in skill_cnt]
 relation_lst = read_skill_graph()
 
 if __name__ == "__main__":
-    direct_name = "resume"
-    env_params = {"lambda_d": 0.1, "beta": 0.2, 'pool_size': 100}
+    direct_name = "preference"
+    os.environ['CUDA_VISIBLE_DEVICES'] = sys.argv[0]
+    env_params = {"lambda_d": 1, "beta": 0.2, 'pool_size': 100}
 
     sample_lst, skill_cnt, jd_len = sample_info()
 
     itemset = itemset_process(skill_cnt)
     d_estimator = DifficultyEstimator(item_sets=[u[0] for u in itemset], item_freq=[u[1] for u in itemset], n_samples=len(sample_lst))
-    job_matcher = JobMatcher(n_top=100, skill_list=[u[0] for u in sample_lst], salary=[u[1] for u in sample_lst], w=5, th=10.0/9)
+    job_matcher = JobMatcher(n_top=100, skill_list=[u[0] for u in sample_lst], salary=[u[1] for u in sample_lst], w=5, th=10.0 / 9, th2=0.1, w_a=2, w_b=0.5)
     environment = Environment(lambda_d=env_params['lambda_d'], d_estimator=d_estimator,
                               job_matcher=job_matcher, n_skill=n_skill)
 
     # train samples 150000, 5000 for test
     train_samples = read_offline_samples(direct_name)
-    train_samples = [(u[0], u[1]) for u in train_samples]
+    # train_samples = [(u[0][0], u[0][1], u[1]) for u in train_samples]
     # train data 145000
     data_train = read_pkl_data(HOME_PATH + "data/%s/train_test/traindata.pkl" % direct_name)
     lst = list(set([u[0] for u in data_train]))
     data_train = []
     for i in lst:
-        data_train.extend([(i, j) for j in range(len(train_samples[i][0]))])
+        data_train.extend([(i, j) for j in range(len(train_samples[i][0][0]))])
     N_train = len(data_train)
     print(N_train)
 
@@ -116,4 +126,4 @@ if __name__ == "__main__":
     evaluate(sampler=sampler, environment=environment, data_test=data_test, train_samples=train_samples, epoch=-1, T=20, verbose=False)
 
     # ----------------- 模型保存 -----------------------
-    act_dnn.save(HOME_PATH + "data/model/%s_ACT_DNN" % direct_name)
+    act_dnn.save(HOME_PATH + "data/prefermodel/%s_ACT_DNN" % direct_name)

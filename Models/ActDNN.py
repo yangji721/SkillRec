@@ -22,6 +22,7 @@ class ActDNN(object):
         feed_dict = {
             self.input_state: data[0],
             self.input_action: data[1],
+            self.preference: data[2],
             self.deep_dropout: self.dropout_deep_feed if train else [1] * len(self.dropout_deep_feed)
         }
         return feed_dict
@@ -70,12 +71,14 @@ class ActDNN(object):
         # 输入
         self.input_state = tf.placeholder(tf.float32, shape=[None, self.n_s], name="input_state")
         self.input_action = tf.placeholder(tf.int32, shape=[None], name="input_action")
+        self.preference = tf.placeholder(tf.float32, shape=[None, self.n_s], name="preference")
         self.onehot_action = tf.one_hot(self.input_action, self.n_s)
-        self.q, penalty_loss = self._state_action_model(self.input_state, self.onehot_action)
+        self.q, penalty_loss = self._state_action_model(self.preference, self.input_state, self.onehot_action)
 
-        self.q = self.q - self.input_state * 1000
+        self.q = self.q - self.input_state * 1000 - self.preference * 1000
         self.q = tf.nn.softmax(self.q, axis=1)
         self.q = tf.multiply(self.q, tf.ones_like(self.input_state) - self.input_state)
+        self.q = tf.multiply(self.q, tf.ones_like(self.preference) - self.preference)
         self.q = self.q / tf.reshape(tf.reduce_sum(self.q, axis=1), [-1, 1])
         self.v = tf.reduce_max(self.q, axis=1)
 
@@ -84,9 +87,9 @@ class ActDNN(object):
         self.pred = tf.reduce_sum(tf.multiply(self.q, self.onehot_action), axis=1)
         return
 
-    def _state_action_model(self, input_state, onehot_action):
-        deep_in = input_state
-        self.deep_dropout, y_deep, loss = self._mlp(deep_in, self.n_s, self.deep_layers, name="state_deep",
+    def _state_action_model(self, input_preference, input_state, onehot_action):
+        deep_in = tf.concat((input_preference, input_state), axis=1)
+        self.deep_dropout, y_deep, loss = self._mlp(deep_in, self.n_s * 2, self.deep_layers, name="state_deep",
                                                     activation=self.activation, bias=True, sparse_input=False)
         q, _ = self._fc(y_deep, self.deep_layers[-1], self.n_s, name="output", l2_reg=0.0,
                         activation=None, bias=True, sparse=False)
@@ -152,9 +155,9 @@ class ActDNN(object):
             print_str += "%s: %f" % name_val
         print(print_str, end=endch)
 
-    def estimate_maxq_action(self, state_vis, act_pool=None):
+    def estimate_maxq_action(self, data_preference, state_vis, act_pool=None):
         q_ret, s_ret = -1000000000, 0
-        data = [[state_vis], [0], [0]]
+        data = [[state_vis], [0], [data_preference]]
         q = self.sess.run(self.q, self.get_dict(data, train=False))[0]
         if act_pool is None:
             act_pool = list(range(self.n_s))
@@ -166,11 +169,11 @@ class ActDNN(object):
                 q_ret, s_ret = q_now, i
         return q_ret, s_ret
 
-    def estimate_single(self, skill_vis, action):
-        data = [[skill_vis], [action], [0]]
+    def estimate_single(self, data_preference, skill_vis, action):
+        data = [[skill_vis], [action], [data_preference]]
         return self.predict(data)[0]
 
-    def get_policy(self, state_vis):
-        data = [[state_vis], [0], [0]]
+    def get_policy(self, data_preference, state_vis):
+        data = [[state_vis], [0], [data_preference]]
         p = self.sess.run(self.q, self.get_dict(data, train=False))[0]
         return p

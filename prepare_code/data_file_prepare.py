@@ -13,7 +13,7 @@ from Environment.DifficultyEstimatorGLinux import DifficultyEstimator
 from Environment.Environment import Environment
 from Environment.JobMatcherLinux import JobMatcher
 from Sampler import DistributionSampler
-from Utils.JobReader import sample_info, n_skill, skill_lst, read_resume_list, read_offline_samples, read_skill_graph, itemset_process
+from Utils.JobReader import sample_info, n_skill, skill_lst, read_resume_list, read_offline_samples, read_skill_graph, itemset_process, reverse_dict
 
 
 def create_cinput_skill_list():
@@ -96,12 +96,20 @@ def validation_split(direct_name, N_test=5000):
         pickle.dump(data_valid, f)
 
 
+
 if __name__ == "__main__":
     env_params = {"lambda_d": 1, "beta": 0.2, 'pool_size': 100}
 
     sample_lst, skill_cnt, jd_len = sample_info()
     n_jd = len(sample_lst)
     resume_list = read_resume_list(skill_cnt)
+
+    #top_k_set = create_top_k_frequent_skill_set()
+    #print(top_k_set)
+    #skill_lst = reverse_dict()
+    #for u in top_k_set:
+    #    print(skill_lst[u], u)
+    #quit()
 
     itemset = itemset_process(skill_cnt)
     d_estimator = DifficultyEstimator(item_sets=[u[0] for u in itemset], item_freq=[u[1] for u in itemset], n_samples=len(sample_lst))

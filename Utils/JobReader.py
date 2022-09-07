@@ -4,7 +4,7 @@ import json
 from CONFIG import JD_PATH, DICT_PATH, HOME_PATH, DICT_NAME_PATH, RESUME_PATH
 from tqdm import tqdm
 from Utils.Utils import read_pkl_data
-import jieba
+
 
 
 def skill_set_process(skill_set):

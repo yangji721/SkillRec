@@ -3,7 +3,7 @@ from tracemalloc import start
 sys.path.append("../../")
 sys.path.append("../")
 from Environment.JobMatcherLinux import JobMatcher
-from Utils.JobReader import n_skill, sample_info, read_offline_samples, read_skill_graph, itemset_process
+from Utils.JobReader import n_skill, sample_info, read_offline_samples, read_skill_graph, itemset_process, read_skill_name, reverse_dict, read_dict
 from Environment.DifficultyEstimatorGLinux import DifficultyEstimator
 from Models.SRDQN import SRDQN
 import os
@@ -211,19 +211,21 @@ if __name__ == "__main__":
     sess.run(tf.global_variables_initializer())
 
     # ----------------- 模型读取 ---------------------
-    # Qa.load(HOME_PATH + "data/prefermodel/%s_SRDQN" % direct_name)
+    Qa.load(HOME_PATH + "data/prefermodel/%s_SRDQN_lambda_%s_beta_%s_pool_size_%s" % (direct_name, sys.argv[2], sys.argv[3], sys.argv[4]))
 
     # ----------------- 模型训练 ---------------------
     print("================Init Training===============")
     on_trainer = OnPolicyTrainer(Qa, Qa_, environment=environment, train_samples=train_samples, beta=env_params['beta'],
                                  memory=memory, sess=sess, relational_lst=relation_lst, pool_size=env_params['pool_size'])
-    print("================Start Training===============")
-    on_trainer.train(n_batch=320000, batch_size=64, data_train=data_train, data_valid=data_valid, verbose_batch=4096,
-                     T=20, target_update_batch=64)
+    # print("================Start Training===============")
+    # on_trainer.train(n_batch=320000, batch_size=64, data_train=data_train, data_valid=data_valid, verbose_batch=4096,
+    #                 T=20, target_update_batch=64)
+
+    # Evaluate experimental result
     sampler = BestStrategyPoolSampler(relation_lst, Qa_, n_skill, pool_size=env_params['pool_size'])
 
     data_test = read_pkl_data(HOME_PATH + "data/%s/train_test/testdata.pkl" % direct_name)
     evaluate(sampler=sampler, environment=environment, data_test=data_valid, train_samples=train_samples, epoch=-1, T=20, verbose=False)
-
+1
     # ----------------- 模型保存 -----------------------
-    Qa.save(HOME_PATH + "data/prefermodel/%s_SRDQN_lambda_%s_beta_%s_pool_size_%s" % (direct_name, sys.argv[2], sys.argv[3], sys.argv[4]))
+    # Qa.save(HOME_PATH + "data/prefermodel/%s_SRDQN_lambda_%s_beta_%s_pool_size_%s" % (direct_name, sys.argv[2], sys.argv[3], sys.argv[4]))

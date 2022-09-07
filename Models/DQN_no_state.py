@@ -37,6 +37,7 @@ class DQN(object):
             self.input_actpool: data[1],
             self.salary_label: data[2],
             self.easy_label: data[3],
+            self.preference: data[4],
             self.deep_easy_dropout: self.dropout_easy_deep_feed if train else [1] * len(self.dropout_easy_deep_feed),
             self.deep_salary_dropout: self.dropout_salary_deep_feed if train else [1] * len(self.dropout_salary_deep_feed),
         }
@@ -91,6 +92,7 @@ class DQN(object):
     def _build_network(self):
         # 输入
         self.input_state = tf.placeholder(tf.float32, shape=[None, self.n_s], name="%s_input_state" % self.name)
+        self.preference = tf.placeholder(tf.float32, shape=[None, self.n_s], name="%s_preference" % self.name)
         self.salary_label = tf.placeholder(tf.float32, shape=[None], name="%s_input_salary_label" % self.name)
         self.easy_label = tf.placeholder(tf.float32, shape=[None], name="%s_input_easy_label" % self.name)
         self.input_actpool = tf.placeholder(tf.int32, shape=[None, self.pool_size], name="%s_input_actpool" % self.name)
@@ -102,13 +104,15 @@ class DQN(object):
 
         input_emb = tf.matmul(self.input_state, emb)
         input_emb = tf.tile(tf.reshape(input_emb, [-1, 1, self.embsize]), [1, self.pool_size, 1])
+        input_preference_emb = tf.matmul(self.preference, emb)
+        input_preference_emb = tf.tile(tf.reshape(input_preference_emb, [-1, 1, self.embsize]), [1, self.pool_size, 1])
         act_emb = tf.nn.embedding_lookup(emb, self.input_actpool)
 
         # ------------------------ salary部分 ---------------------
-        salary_in = tf.concat((input_emb, act_emb), axis=2)  # -1, pool_size, embsize
-        deep_in = tf.reshape(salary_in, [-1, self.embsize * 2])
+        salary_in = tf.concat((input_preference_emb, input_emb, act_emb), axis=2)  # -1, pool_size, embsize
+        deep_in = tf.reshape(salary_in, [-1, self.embsize * 3])
 
-        self.deep_salary_dropout, y_deep, penalty_loss = self._mlp(deep_in, self.embsize * 2, self.salary_deep_layers,
+        self.deep_salary_dropout, y_deep, penalty_loss = self._mlp(deep_in, self.embsize * 3, self.salary_deep_layers,
                                                                    name="%s_deep_salary" % self.name,
                                                                    activation=self.activation, bias=True, sparse_input=False)
         self.q_salary, _ = self._fc(y_deep, self.salary_deep_layers[-1], 1, name="%s_salary_Inc" % self.name, l2_reg=0.0,
@@ -204,18 +208,18 @@ class DQN(object):
             print_str += "%s: %f" % name_val
         print(print_str, end=endch)
 
-    def estimate_maxq_action(self, state_vis, act_pool):
-        data = [[state_vis], [act_pool], [0], [0]]
+    def estimate_maxq_action(self, data_preference, state_vis, act_pool):
+        data = [[state_vis], [act_pool], [0], [0], [data_preference]]
         act, v_salary, v_easy = self.sess.run((self.v_skill, self.v_salary, self.v_easy), self.get_dict(data, train=False))
         return (v_salary[0], v_easy[0]), act[0]
 
-    def estimate_maxq_batch(self, data_state, data_pool):
+    def estimate_maxq_batch(self, data_preference, data_state, data_pool):
         n_data = len(data_state)
         act_lst, v_salary, v_easy = self.sess.run((self.v_skill, self.v_salary, self.v_easy),
-                                                  self.get_dict((data_state, data_pool, [0] * n_data, [0] * n_data), train=False))
+                                                  self.get_dict((data_state, data_pool, [0] * n_data, [0] * n_data, data_preference), train=False))
         return (v_salary, v_easy), act_lst
 
-    def get_q_list(self, skill_vis, act_pool):
-        data = [[skill_vis], [act_pool], [0], [0]]
+    def get_q_list(self, data_preference, skill_vis, act_pool):
+        data = [[skill_vis], [act_pool], [0], [0], [data_preference]]
         q_salary_lst, q_easy_lst = self.sess.run((self.q_salary, self.q_easy), self.get_dict(data, train=False))
         return q_salary_lst[0], q_easy_lst[0]

@@ -32,6 +32,7 @@ class DNN(object):
             self.input_state: data[0],
             self.input_action: data[1],
             self.input_label: data[2],
+            self.preference: data[3],
             self.deep_dropout: self.dropout_deep_feed if train else [1] * len(self.dropout_deep_feed),
         }
         return feed_dict
@@ -83,17 +84,19 @@ class DNN(object):
         self.input_state = tf.placeholder(tf.float32, shape=[None, self.n_s], name="%s_input_state" % self.name)
         self.input_label = tf.placeholder(tf.float32, shape=[None], name="%s_input_label" % self.name)
         self.input_action = tf.placeholder(tf.int32, shape=[None], name="%s_input_action" % self.name)
+        self.preference = tf.placeholder(tf.float32, shape=[None, self.n_s], name="%s_preference" % self.name)
 
         # ------------------------ 读embedding -------------------
         emb = tf.Variable(np.random.normal(size=(self.n_s, self.embsize)), dtype=np.float32, name="%s_embedding" % self.name)
         self.weights["%s_embedding" % self.name] = emb
 
         input_emb = tf.matmul(self.input_state, emb)
+        input_preference_emb = tf.matmul(self.preference, emb)
         act_emb = tf.nn.embedding_lookup(emb, self.input_action)
 
         # --------------------- easy部分 --------------------------------
         # concat input state with actions
-        deep_in = tf.concat((input_emb, act_emb), axis=1)
+        deep_in = tf.concat((input_preference_emb + input_emb, act_emb), axis=1)
 
         self.deep_dropout, y_deep, penalty_loss = self._mlp(deep_in, self.embsize * 2, self.deep_layers, name="%s_deep" % self.name,
                                                             activation=self.activation, bias=True, sparse_input=False)
@@ -164,8 +167,8 @@ class DNN(object):
             print_str += "%s: %f" % name_val
         print(print_str, end=endch)
 
-    def estimate_maxq_action(self, state_vis, act_pool):
-        data = [[state_vis] * len(act_pool), act_pool, [0] * len(act_pool)]
+    def estimate_maxq_action(self, data_preference, state_vis, act_pool):
+        data = [[state_vis] * len(act_pool), act_pool, [0] * len(act_pool), [data_preference]]
         q_lst = self.sess.run(self.q, self.get_dict(data, train=False))
         sret, qret = -1, -1000000
         for s, q in zip(act_pool, q_lst):

@@ -7,7 +7,6 @@ from Environment.DifficultyEstimatorGLinux import DifficultyEstimator
 #from Environment.CorrelationDifficulty.DifficultyEstimator import get_estimator
 from Models.DQN_no_state import DQN
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import tensorflow as tf
 from Utils.Utils import sparse_to_dense, read_pkl_data
 from Utils.Functions import evaluate
@@ -21,6 +20,23 @@ from math import log
 
 
 class OnPolicyTrainer(object):
+
+    def get_act_pool_with_preference(self, state, preference):
+        cnt = [0] * n_skill
+        for i in range(n_skill):
+            if state[i] == 1 or preference[i] == 1:
+                for u in self.relational_lst[i]:
+                    cnt[u] += 1
+        skill_id = list(range(n_skill))
+        skill_id.sort(key=lambda x: cnt[x] + 1e-5 * x, reverse=True)
+        ret = []
+        for u in range(n_skill):
+            s = skill_id[u]
+            if state[s] == 0:
+                ret.append(s)
+            if len(ret) == self.pool_size:
+                break
+        return ret
 
     def get_act_pool(self, state):
         cnt = [0] * n_skill
@@ -71,26 +87,27 @@ class OnPolicyTrainer(object):
             if it != 0 and it % target_update_batch == 0:
                 self.target_update()
 
-            if it % verbose_batch == 0:
+            if it != 0 and it % verbose_batch == 0:
                 evaluate(self.best_sampler, self.environment, data_valid, self.train_samples, it / verbose_batch, T=T, verbose=False)
                 self.sampler.epsilon += (1-self.sampler.epsilon) * 0.1
-                self.Qnet.save(save_path)
+                #self.Qnet.save(save_path)
 
             self.environment.clear()
 
             # 采样一个前缀
             k = randint(0, n_data - 1)
             x, y = data_train[k]
-            prefix = self.train_samples[x][0]
+            prefix = self.train_samples[x][0][0]
+            preference = self.train_samples[x][0][1]
 
             salary_pre = self.environment.add_prefix(prefix)
             for t in range(T):
                 state_pre = self.environment.state_list.copy()
-                s, _ = self.sampler.sample(self.environment.state)
-                easy, salary, r = self.environment.add_skill(s, evaluate=True)
-                state_pre_name = [skill_lst[u] for u in state_pre]
-                s_name = skill_lst[s]
-                self.memory.store((state_pre, s, (easy, salary - salary_pre)))  # 要有遗忘才行
+                s, _ = self.sampler.sample_with_preference(sparse_to_dense(preference, n_skill), self.environment.state)
+                easy, salary, r, _, _ = self.environment.add_skill(s, evaluate=True)
+                # state_pre_name = [skill_lst[u] for u in state_pre]
+                # s_name = skill_lst[s]
+                self.memory.store((state_pre, s, (easy, salary - salary_pre), preference))  # 要有遗忘才行
 #                print(state_pre, s, easy, salary, r)
                 salary_pre = salary
 
@@ -106,13 +123,14 @@ class OnPolicyTrainer(object):
         data_skill = [u[1] for u in data_batch]
         data_easy = [u[2][0] for u in data_batch]
         data_salary = [u[2][1] for u in data_batch]
+        data_preference = [sparse_to_dense(u[3], n_skill) for u in data_batch]
 
         pool_nxt = []
-        for state, skill in zip(data_state, data_skill):
+        for state, preference, skill in zip(data_state, data_preference, data_skill):
             state[skill] = 1
-            pool_nxt.append(self.get_act_pool(state))
+            pool_nxt.append(self.get_act_pool_with_preference(state, preference))
 
-        data_salary_easy, _ = self.Qtarget.estimate_maxq_batch(data_state, pool_nxt)  #
+        data_salary_easy, _ = self.Qtarget.estimate_maxq_batch(data_preference, data_state, pool_nxt)  #
         data_salary_q, data_easy_q = data_salary_easy
 
         for state, skill in zip(data_state, data_skill):
@@ -121,7 +139,7 @@ class OnPolicyTrainer(object):
         data_easy = [r + (1 - self.beta) * q for r, q in zip(data_easy, data_easy_q)]
         data_salary = [r + (1 - self.beta) * q for r, q in zip(data_salary, data_salary_q)]
 
-        return data_state, [[skill] * self.pool_size for skill in data_skill], data_salary, data_easy # data_easy
+        return data_state, [[skill] * self.pool_size for skill in data_skill], data_salary, data_easy, data_preference # data_easy
 
 
 # 参数读取
@@ -130,14 +148,14 @@ skill_p = [log(u * 1.0 / len(sample_lst)) for u in skill_cnt]
 relation_lst = read_skill_graph()
 
 if __name__ == "__main__":
-    direct_name = "resume"
-#    env_params = {"lambda_d": 0.1, "beta": 0.2, 'pool_size': 50}
+    direct_name = "preference"
+    os.environ['CUDA_VISIBLE_DEVICES'] = sys.argv[1]
     env_params = {"lambda_d": 0.1, "beta": 0.2, 'pool_size': 100}
-    save_path = HOME_PATH + "data/model/%s_DQN_no_state"%direct_name
+    save_path = HOME_PATH + "data/prefermodel/%s_DQN_no_state"%direct_name
     # 难度 & 奖励
     itemset = itemset_process(skill_cnt)
     d_estimator = DifficultyEstimator(item_sets=[u[0] for u in itemset], item_freq=[u[1] for u in itemset], n_samples=len(sample_lst))
-    job_matcher = JobMatcher(n_top=100, skill_list=[u[0] for u in sample_lst], salary=[u[1] for u in sample_lst], w=5, th=10.0 / 9)
+    job_matcher = JobMatcher(n_top=100, skill_list=[u[0] for u in sample_lst], salary=[u[1] for u in sample_lst], w=5, th=10.0 / 9, th2=0.1, w_a=2, w_b=0.5)
 
     environment = Environment(lambda_d=env_params['lambda_d'], d_estimator=d_estimator,
                               job_matcher=job_matcher, n_skill=n_skill)
@@ -177,7 +195,7 @@ if __name__ == "__main__":
     # ----------------- 模型训练 ---------------------
     on_trainer = OnPolicyTrainer(Qa, Qa_, environment=environment, train_samples=train_samples, beta=env_params['beta'],
                                  memory=memory, sess=sess, relational_lst=relation_lst, pool_size=env_params['pool_size'])
-    on_trainer.train(n_batch=320000, batch_size=32, data_train=data_train, data_valid=data_valid, verbose_batch=4096, save_path=save_path,
+    on_trainer.train(n_batch=320000, batch_size=128, data_train=data_train, data_valid=data_valid, verbose_batch=4096, save_path=save_path,
                      T=20, target_update_batch=128)
     sampler = BestStrategyPoolSampler(relation_lst, Qa_, n_skill, pool_size=env_params['pool_size'])
 
